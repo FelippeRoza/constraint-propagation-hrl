@@ -1,0 +1,9 @@
+torch
+transformers
+einops
+stable-baselines3[extra]
+# gymnasium # safety-gymnasium depends on gymnasium, so keep this
+git+https://github.com/PKU-Alignment/safety-gymnasium.git@main#egg=safety-gymnasium
+pyyaml
+opencv-python-headless
+huggingface-hub
