@@ -20,8 +20,12 @@ def main(config_path):
         config = yaml.safe_load(f)
 
     # Setup environment
-    env = make_safety_env(env_name=config['environment']['name'], render_mode="human")
-    vec_env = make_vec_env(lambda: env, n_envs=1)
+    # Use multiple environments for faster training and disable rendering
+    n_envs = config['training'].get('n_envs', 8)
+    vec_env = make_vec_env(
+        lambda: make_safety_env(env_name=config['environment']['name'], render_mode=None),
+        n_envs=n_envs
+    )
 
     # Get proprioceptive dimension from the wrapped environment's observation space
     proprio_dim = vec_env.observation_space['proprio'].shape[0]
@@ -44,8 +48,8 @@ def main(config_path):
         vec_env,
         verbose=1,
         learning_rate=float(config['training']['lr']),
-        batch_size=config['training']['batch_size'],
-        n_steps=config['training']['n_steps'] if 'n_steps' in config['training'] else 2048, # Number of steps to run for each environment per update
+        batch_size=config['training'].get('batch_size', 64), # Lower default batch size to prevent VRAM OOM
+        n_steps=config['training'].get('n_steps', 512), # Lower default n_steps to prevent RAM OOM
         policy_kwargs=policy_kwargs,
         tensorboard_log="./ppo_multimodal_tensorboard/"
     )
@@ -55,7 +59,7 @@ def main(config_path):
     print(f"Algorithm: {config['training']['algo']}")
     print("------------------------")
 
-    total_timesteps = config['training']['total_timesteps'] if 'total_timesteps' in config['training'] else 1_000_000
+    total_timesteps = config['training'].get('total_timesteps', 1_000_000)
     model.learn(
         total_timesteps=total_timesteps,
         log_interval=1, # Log every 1 update

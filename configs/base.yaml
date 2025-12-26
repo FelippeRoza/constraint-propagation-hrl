@@ -4,8 +4,9 @@ model:
 training:
   algo: PPO
   lr: 3e-4
-  batch_size: 64 # Minibatch size for PPO
-  n_steps: 2048 # Number of steps to collect per environment before updating
+  n_envs: 8 # Number of environments to run in parallel
+  batch_size: 32 # Minibatch size for PPO
+  n_steps: 512 # Number of steps to collect per environment before updating
   total_timesteps: 1_000_000 # Total number of timesteps to train for
 environment:
   name: SafetyCarGoal2Vision-v0
