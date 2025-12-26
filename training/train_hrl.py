@@ -43,6 +43,20 @@ def main(config_path):
         net_arch=[dict(pi=[64, 64], vf=[64, 64])]
     )
 
+    # Determine device: Check for NVIDIA, Apple MPS, Intel XPU, otherwise let SB3 decide (auto)
+    device = "auto"
+    if torch.cuda.is_available():
+        device = "cuda"
+        print(f"NVIDIA GPU detected: {torch.cuda.get_device_name(0)}")
+        torch.cuda.empty_cache()
+    elif torch.backends.mps.is_available():
+        device = "mps"
+        print("Apple Silicon GPU detected")
+    elif hasattr(torch, 'xpu') and torch.xpu.is_available():
+        device = "xpu"
+        print(f"Intel Arc GPU detected: {torch.xpu.get_device_name(0)}")
+        torch.xpu.empty_cache()
+
     model = PPO(
         "MultiInputPolicy", # MultiInputPolicy for Dict observation spaces
         vec_env,
@@ -51,7 +65,8 @@ def main(config_path):
         batch_size=config['training'].get('batch_size', 64), # Lower default batch size to prevent VRAM OOM
         n_steps=config['training'].get('n_steps', 512), # Lower default n_steps to prevent RAM OOM
         policy_kwargs=policy_kwargs,
-        tensorboard_log="./ppo_multimodal_tensorboard/"
+        tensorboard_log="./ppo_multimodal_tensorboard/",
+        device=device
     )
 
     print("--- Training Started ---")
