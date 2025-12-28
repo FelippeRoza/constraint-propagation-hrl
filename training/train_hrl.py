@@ -1,18 +1,50 @@
 # training/train_hrl.py
 import torch
 import argparse
+import numpy as np
 import torch.nn as nn
 import yaml
+from collections import deque
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.policies import ActorCriticPolicy
-from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from environments.safety_wrappers import make_safety_env
 from models.custom_feature_extractor import CustomMultimodalFeatureExtractor
+
+
+class SafetyMetricsCallback(BaseCallback):
+    """
+    Callback for logging safety metrics (cost) to TensorBoard.
+    """
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
+        self.current_costs = None
+        self.episode_costs = deque(maxlen=100)
+
+    def _on_training_start(self):
+        self.current_costs = np.zeros(self.training_env.num_envs)
+
+    def _on_step(self) -> bool:
+        infos = self.locals['infos']
+        dones = self.locals['dones']
+        
+        for i, info in enumerate(infos):
+            if 'cost' in info:
+                self.current_costs[i] += info['cost']
+            
+            if dones[i]:
+                self.episode_costs.append(self.current_costs[i])
+                self.current_costs[i] = 0
+        return True
+
+    def _on_rollout_end(self):
+        if len(self.episode_costs) > 0:
+            self.logger.record("rollout/ep_cost_mean", np.mean(self.episode_costs))
 
 
 def main(config_path):
@@ -83,11 +115,13 @@ def main(config_path):
         save_path='./checkpoints/models/',
         name_prefix='ppo_multimodal_agent'
     )
+    
+    safety_callback = SafetyMetricsCallback()
 
     total_timesteps = config['training'].get('total_timesteps', 1_000_000)
     model.learn(
         total_timesteps=total_timesteps,
-        callback=checkpoint_callback,
+        callback=[checkpoint_callback, safety_callback],
         log_interval=1, # Log every 1 update
         progress_bar=True
     )
