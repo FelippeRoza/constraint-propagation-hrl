@@ -77,6 +77,7 @@ def main(config_path):
 
     # Save model checkpoints
     checkpoint_freq = config['training'].get('checkpoint_freq', 50000)
+    checkpoint_freq = max(checkpoint_freq // n_envs, 1)
     checkpoint_callback = CheckpointCallback(
         save_freq=checkpoint_freq,
         save_path='./checkpoints/models/',
