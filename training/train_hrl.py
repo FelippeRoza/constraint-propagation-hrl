@@ -6,6 +6,7 @@ import yaml
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.policies import ActorCriticPolicy
+from stable_baselines3.common.callbacks import CheckpointCallback
 
 import sys
 import os
@@ -74,9 +75,18 @@ def main(config_path):
     print(f"Algorithm: {config['training']['algo']}")
     print("------------------------")
 
+    # Save model checkpoints
+    checkpoint_freq = config['training'].get('checkpoint_freq', 50000)
+    checkpoint_callback = CheckpointCallback(
+        save_freq=checkpoint_freq,
+        save_path='./checkpoints/models/',
+        name_prefix='ppo_multimodal_agent'
+    )
+
     total_timesteps = config['training'].get('total_timesteps', 1_000_000)
     model.learn(
         total_timesteps=total_timesteps,
+        callback=checkpoint_callback,
         log_interval=1, # Log every 1 update
         progress_bar=True
     )
