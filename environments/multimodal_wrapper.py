@@ -14,7 +14,7 @@ class MultimodalWrapper(gym.Wrapper):
     It generates placeholder data for vision and text modalities, as the base
     environment only provides proprioceptive data.
     """
-    def __init__(self, env):
+    def __init__(self, env, cost_coefficient=1.0):
         super().__init__(env)
         # Initialize the tokenizer for the text modality
         self.tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
@@ -24,6 +24,9 @@ class MultimodalWrapper(gym.Wrapper):
         # A value of 1.0 means the object is at the agent's location
         # A value of 0.0 means the object is at the maximum lidar distance
         self.lidar_threshold = 0.7
+        
+        # Coefficient to penalize unsafe behavior in the reward function
+        self.cost_coefficient = cost_coefficient
 
         self.is_vision_env = isinstance(self.env.observation_space, gym.spaces.Dict)
 
@@ -136,6 +139,10 @@ class MultimodalWrapper(gym.Wrapper):
     def step(self, action):
         # Pack the 'cost' into the info dictionary to maintain compatibility with sb3
         obs, reward, cost, terminated, truncated, info = self.env.step(action)
+        
+        # Reward Shaping: Penalize the agent for unsafe behavior (costs)
+        # This allows standard PPO to learn a balance between task performance and safety.
+        reward -= self.cost_coefficient * cost
         
         multimodal_obs, info_with_text = self._create_multimodal_obs(obs, info)
         info_with_text['cost'] = cost
