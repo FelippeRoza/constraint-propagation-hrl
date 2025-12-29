@@ -3,6 +3,8 @@ import gymnasium as gym
 import numpy as np
 from gymnasium.spaces import flatten, flatten_space
 from transformers import AutoTokenizer
+import cv2
+
 
 class MultimodalWrapper(gym.Wrapper):
     """
@@ -37,7 +39,7 @@ class MultimodalWrapper(gym.Wrapper):
             # For non-vision envs, the whole observation is proprioception
             self.proprio_space = self.env.observation_space
 
-        self.vision_space = gym.spaces.Box(low=0, high=255, shape=(256, 256, 3), dtype=np.uint8)
+        self.vision_space = gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8)
         self.text_space = gym.spaces.Box(low=0, high=self.tokenizer.vocab_size, shape=(self.seq_len,), dtype=np.int64)
         self.text_attention_mask_space = gym.spaces.Box(low=0, high=1, shape=(128,), dtype=np.int64)
 
@@ -98,7 +100,7 @@ class MultimodalWrapper(gym.Wrapper):
         
         if self.is_vision_env:
             # The observation is a dictionary. Extract vision and flatten the rest for proprio
-            vision_obs = obs['vision']
+            vision_obs = cv2.resize(obs['vision'], (64, 64), interpolation=cv2.INTER_AREA)
             proprio_obs_dict = {k: v for k, v in obs.items() if k != 'vision'}            
             proprio_flat = flatten(self.proprio_subspace, proprio_obs_dict)
         else:
