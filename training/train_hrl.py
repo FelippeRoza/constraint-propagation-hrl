@@ -3,6 +3,8 @@ import torch
 import argparse
 import numpy as np
 import torch.nn as nn
+import cv2
+import gymnasium as gym
 import yaml
 from collections import deque
 from stable_baselines3 import PPO
@@ -46,8 +48,29 @@ class SafetyMetricsCallback(BaseCallback):
         if len(self.episode_costs) > 0:
             self.logger.record("rollout/ep_cost_mean", np.mean(self.episode_costs))
 
+class BaselineWrapper(gym.ObservationWrapper):
+    """
+    Prepares the environment for a standard PPO baseline:
+    1. Removes text modalities (text, text_attention_mask) which require special handling.
+    2. Resizes vision observation to 64x64 for efficient standard CNN processing.
+    """
+    def __init__(self, env):
+        super().__init__(env)
+        # Define new observation space: Vision (64x64) + Proprioception
+        self.observation_space = gym.spaces.Dict({
+            'vision': gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8),
+            'proprio': env.observation_space['proprio']
+        })
 
-def main(config_path):
+    def observation(self, obs):
+        # Resize vision image from 256x256 to 64x64
+        vision_resized = cv2.resize(obs['vision'], (64, 64), interpolation=cv2.INTER_AREA)
+        return {
+            'vision': vision_resized,
+            'proprio': obs['proprio']
+        }
+
+def main(config_path, model_type):
     # Load configuration from YAML file
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
@@ -55,26 +78,37 @@ def main(config_path):
     # Setup environment
     # Use multiple environments for faster training and disable rendering
     n_envs = config['training'].get('n_envs', 8)
+
+    def make_env():
+        env = make_safety_env(env_name=config['environment']['name'], render_mode=None)
+        if model_type == 'baseline':
+            env = BaselineWrapper(env)
+        return env
+
     vec_env = make_vec_env(
-        lambda: make_safety_env(env_name=config['environment']['name'], render_mode=None),
+        make_env,
         n_envs=n_envs
     )
 
-    # Get proprioceptive dimension from the wrapped environment's observation space
-    proprio_dim = vec_env.observation_space['proprio'].shape[0]
-    action_dim = vec_env.action_space.shape[0]
+    if model_type == 'hrl':
+        # Get proprioceptive dimension from the wrapped environment's observation space
+        proprio_dim = vec_env.observation_space['proprio'].shape[0]
+        action_dim = vec_env.action_space.shape[0]
 
-    model_config = config['model']
-    policy_kwargs = dict(
-        features_extractor_class=CustomMultimodalFeatureExtractor,
-        features_extractor_kwargs=dict(
-            embed_dim=model_config['embed_dim'],
-            proprio_dim=proprio_dim,
-            tiny_transformer_layers=model_config['tiny_transformer_layers'],
-            action_dim=action_dim
-        ),
-        net_arch=[dict(pi=[64, 64], vf=[64, 64])]
-    )
+        model_config = config['model']
+        policy_kwargs = dict(
+            features_extractor_class=CustomMultimodalFeatureExtractor,
+            features_extractor_kwargs=dict(
+                embed_dim=model_config['embed_dim'],
+                proprio_dim=proprio_dim,
+                tiny_transformer_layers=model_config['tiny_transformer_layers'],
+                action_dim=action_dim
+            ),
+            net_arch=[dict(pi=[64, 64], vf=[64, 64])]
+        )
+    else:
+        # Baseline configuration
+        policy_kwargs = None
 
     # Determine device: Check for NVIDIA, Apple MPS, Intel XPU, otherwise let SB3 decide (auto)
     device = "auto"
@@ -98,7 +132,7 @@ def main(config_path):
         batch_size=config['training'].get('batch_size', 64), # Lower default batch size to prevent VRAM OOM
         n_steps=config['training'].get('n_steps', 512), # Lower default n_steps to prevent RAM OOM
         policy_kwargs=policy_kwargs,
-        tensorboard_log="./ppo_multimodal_tensorboard/",
+        tensorboard_log=f'tensorboard/ppo_{model_type}',
         device=device
     )
 
@@ -112,8 +146,8 @@ def main(config_path):
     checkpoint_freq = max(checkpoint_freq // n_envs, 1)
     checkpoint_callback = CheckpointCallback(
         save_freq=checkpoint_freq,
-        save_path='./checkpoints/models/',
-        name_prefix='ppo_multimodal_agent'
+        save_path=f'./checkpoints/{model_type}',
+        name_prefix=f'ppo_{model_type}_agent'
     )
     
     safety_callback = SafetyMetricsCallback()
@@ -126,12 +160,11 @@ def main(config_path):
         progress_bar=True
     )
     
-    # Save the trained model
-    model.save("ppo_multimodal_agent")
-    print("Training finished and model saved.")
+    print("Training finished.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train a Hierarchical Reinforcement Learning agent.")
     parser.add_argument("--config", type=str, required=True, help="Path to the configuration YAML file.")
+    parser.add_argument("--type", type=str, default="hrl", choices=["hrl", "baseline"], help="Type of model to train (hrl or baseline).")
     args = parser.parse_args()
-    main(args.config)
+    main(args.config, args.type)
