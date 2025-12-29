@@ -3,8 +3,9 @@ import torch.nn as nn
 from transformers import AutoModel
 
 class MultimodalEncoder(nn.Module):
-    def __init__(self, proprio_dim, embed_dim=512):
+    def __init__(self, proprio_dim, embed_dim=512, freeze_backbones=True):
         super().__init__()
+        self.freeze_backbones = freeze_backbones
         self.vision_encoder = AutoModel.from_pretrained("facebook/dinov2-small")  # image embeddings
         self.text_encoder = AutoModel.from_pretrained("distilbert-base-uncased")  # text embeddings
         self.proprio_encoder = nn.Sequential(
@@ -19,6 +20,18 @@ class MultimodalEncoder(nn.Module):
 
         # Add a projection layer to map the combined embedding to the desired dimension
         self.projection = nn.Linear(combined_dim, embed_dim)
+
+        if self.freeze_backbones:
+            for param in self.vision_encoder.parameters():
+                param.requires_grad = False
+            for param in self.text_encoder.parameters():
+                param.requires_grad = False
+
+    def train(self, mode=True):
+        super().train(mode)
+        if self.freeze_backbones:
+            self.vision_encoder.eval()
+            self.text_encoder.eval()
 
     def forward(self, vision, text, text_attention_mask, proprio):
         v = self.vision_encoder(vision).last_hidden_state.mean(dim=1)
